@@ -1,0 +1,101 @@
+!pip install boxsdk
+
+import pandas as pd
+import boxsdk
+from boxsdk import OAuth2, Client
+import requests
+import os
+import zipfile
+import io
+
+CLIENT_ID = 'jzp0w0emh31fj3eqq2bftc5mnxihc5mu'
+CLIENT_SECRET = 'tjxicu6IZjSMUgaXPwbcECttPI6hk5Or'
+ACCESS_TOKEN = 'bhmDdNDv2hw1lt4v63q4FNP39z5O6XMO'
+oauth2 = OAuth2(CLIENT_ID,CLIENT_SECRET)
+auth_url,csrf_token = oauth2.get_authorization_url("https://flex.ent.box.com/folder/0")
+print(auth_url)
+authentication_code = input("Enter the authentication code: ")
+access_token,refresh_token = oauth2.authenticate(authentication_code)
+
+client = Client(oauth2)
+file_id = '1589040078253'
+#得到文件夹里面的全部文件
+file_name = client.file(file_id).get()
+output_file_path = '/content/Original_Data'
+if not os.path.exists(output_file_path):
+  os.makedirs(output_file_path)
+file_path = os.path.join(output_file_path, file_name.name)
+with open(file_path, 'wb') as f:
+    file_name.download_to(f)
+
+file_path = "/content/Original_Data/DCBusbarInspectionResult.csv"
+df = pd.read_csv(file_path,header = None)
+header_row = df.iloc[0]
+df_cleaned = df[df.apply(lambda x: not x.equals(header_row),axis = 1)]
+df_cleaned.columns = header_row
+df_cleaned.to_csv(file_path,index = False)
+
+file_path = "/content/Original_Data/DCBusbarInspectionResult.csv"
+df = pd.read_csv(file_path)
+grouped = df.groupby('Date_Time')
+path_folder = '/content/Processed_Data'
+output_file_NG = '/content/Processed_Data/NG.xlsx'
+output_file_OK = '/content/Processed_Data/OK.xlsx'
+if not os.path.exists(path_folder):
+  os.makedirs(path_folder)
+start_row = 0
+is_first_write = True
+with pd.ExcelWriter(output_file_NG) as writer:
+  ng_written = False
+  for name,group in grouped:
+    if 'NG' in group.values:
+      group.to_excel(writer,sheet_name='sheet1',startrow=start_row)
+      start_row += 9
+      ng_written = True
+      #group.to_excel(output_file_NG, mode = 'a', header = not os.path.isfile(output_file_NG),index = False)
+      continue
+  if not ng_written:
+      pd.DataFrame().to_excel(writer,sheet_name='Non_NG')
+
+for name,group in grouped:
+    if 'NG' not in group.values:
+      sheet_names = group['TestType'].unique()
+      for sheet_name in sheet_names:
+        data = group[group['TestType'] == sheet_name]
+        if not os.path.isfile(f'/content/{sheet_name}.csv'):
+          data.to_csv(f'/content/{sheet_name}.csv',mode = 'w',header = True, index = False)
+        else:
+          data.to_csv(f'/content/{sheet_name}.csv',mode = 'a',header = False, index = False)
+csv_files_path = ['/content/Angle1.csv','/content/Angle2.csv','/content/Angle3.csv','/content/Angle4.csv','/content/Distance1.csv','/content/Distance2.csv','/content/Distance3.csv','/content/Distance4.csv']
+with pd.ExcelWriter(output_file_OK) as writer:
+  for csv_file in csv_files_path:
+    df = pd.read_csv(csv_file)
+    sheet_name = os.path.splitext(os.path.basename(csv_file))[0]
+    df.to_excel(writer,sheet_name=sheet_name,index = False)
+
+for sheet_name in sheet_names:
+  data = group[group['TestType'] == sheet_name]
+  current_file = f'/content/{sheet_name}.csv'
+  if os.path.exists(current_file):
+    os.remove(current_file)
+
+
+root_path_id = '274776961616'
+root_folder_path = client.folder(root_path_id).get()
+upload_file_name_NG = 'NG.xlsx'
+upload_file_name_OK = 'OK.xlsx'
+with open(output_file_NG, 'rb') as file:
+  root_folder_path.upload_stream(file,upload_file_name_NG)
+with open(output_file_OK, 'rb') as file:
+  root_folder_path.upload_stream(file,upload_file_name_OK)
+
+
+Original_Data_path = f'/content/Original_Data/DCBusbarInspectionResult.csv'
+Processed_Data_NG_path = f'/content/Processed_Data/NG.xlsx'
+Processed_Data_OK_path = f'/content/Processed_Data/OK.xlsx'
+if os.path.exists(Original_Data_path):
+  os.remove(Original_Data_path)
+if os.path.exists(Processed_Data_NG_path):
+  os.remove(Processed_Data_NG_path)
+if os.path.exists(Processed_Data_OK_path):
+  os.remove(Processed_Data_OK_path)
